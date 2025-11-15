@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-cost-alerts
+  namespace: monitoring
+data:
+  kube-cost-alerts.yaml: |
+    groups:
+      - name: kubernetes-cost-alerts
+        interval: 60s
+        rules:
+          # Alert when namespace exceeds monthly budget
+          - alert: NamespaceCostBudgetExceeded
+            expr: sum(kube_cost_namespace_daily_usd) by (namespace) * 30 > 500
+            for: 5m
+            labels:
+              severity: warning
+              team: finops
+            annotations:
+              summary: "Namespace {{ $labels.namespace }} exceeds monthly budget"
+              description: "Namespace {{ $labels.namespace }} is projected to cost ${{ $value | humanize }} this month, exceeding the $500 budget."
+              dashboard: "https://grafana/d/kube-cost-overview?var-namespace={{ $labels.namespace }}"
+
+          # Alert when cluster cost increases significantly
+          - alert: ClusterCostIncrease
+            expr: |
+              (
+                sum(kube_cost_cluster_hourly_usd) -
+                sum(kube_cost_cluster_hourly_usd offset 24h)
+              ) / sum(kube_cost_cluster_hourly_usd offset 24h) * 100 > 20
+            for: 15m
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "Cluster cost increased by {{ $value | humanize }}%"
+              description: "Cluster hourly cost has increased by more than 20% compared to 24 hours ago."
+              runbook: "https://runbooks.example.com/cluster-cost-spike"
+
+          # Alert when pod cost is unusually high
+          - alert: HighPodCost
+            expr: kube_cost_pod_hourly_usd > 1.0
+            for: 10m
+            labels:
+              severity: info
+              team: engineering
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has high hourly cost"
+              description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} costs ${{ $value | humanize }}/hour (${{ $value | humanize | multiply 730 }}/month)."
+              action: "Review resource requests and consider optimization."
+
+          # Alert when spot instance savings opportunity is missed
+          - alert: LowSpotInstanceUsage
+            expr: |
+              (
+                sum(kube_cost_spot_savings_hourly_usd) /
+                (sum(kube_cost_cluster_hourly_usd) + sum(kube_cost_spot_savings_hourly_usd))
+              ) * 100 < 30
+            for: 1h
+            labels:
+              severity: info
+              team: platform
+            annotations:
+              summary: "Low spot instance usage - missing savings opportunity"
+              description: "Only {{ $value | humanize }}% of cluster compute is using spot instances. Consider increasing spot instance adoption for cost savings."
+              potential_savings: "Could save an estimated ${{ $value | humanize | multiply 0.7 }}/hour."
+
+          # Alert when cost metrics are not being updated
+          - alert: CostMetricsStale
+            expr: time() - kube_cost_cluster_hourly_usd > 300
+            for: 5m
+            labels:
+              severity: critical
+              team: platform
+            annotations:
+              summary: "Cost metrics are not being updated"
+              description: "The kube-cost-exporter hasn't updated metrics in over 5 minutes. Check if the service is running."
+
+          # Alert for namespace cost anomaly detection
+          - alert: NamespaceCostAnomaly
+            expr: |
+              abs(
+                sum(kube_cost_namespace_hourly_usd) by (namespace) -
+                avg_over_time(sum(kube_cost_namespace_hourly_usd) by (namespace)[24h:1h])
+              ) / avg_over_time(sum(kube_cost_namespace_hourly_usd) by (namespace)[24h:1h]) * 100 > 50
+            for: 30m
+            labels:
+              severity: warning
+              team: engineering
+            annotations:
+              summary: "Unusual cost pattern detected in namespace {{ $labels.namespace }}"
+              description: "Namespace {{ $labels.namespace }} cost deviates by {{ $value | humanize }}% from its 24-hour average."
+
+          # Alert when monthly projected costs exceed threshold
+          - alert: MonthlyProjectedCostHigh
+            expr: sum(kube_cost_cluster_hourly_usd) * 730 > 10000
+            for: 1h
+            labels:
+              severity: critical
+              team: finops
+            annotations:
+              summary: "Monthly projected cluster cost exceeds $10,000"
+              description: "Based on current hourly rate, the cluster is projected to cost ${{ $value | humanize }} this month."
+              action: "Immediate cost optimization review required."

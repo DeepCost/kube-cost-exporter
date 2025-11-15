@@ -1,0 +1,125 @@
+stages:
+  - cost-analysis
+
+cost-estimate:
+  stage: cost-analysis
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+
+  only:
+    - merge_requests
+
+  variables:
+    PROMETHEUS_URL: "http://prometheus.monitoring.svc.cluster.local:9090"
+
+  before_script:
+    # Install kubectl-cost plugin
+    - curl -L https://github.com/deepcost/kube-cost-exporter/releases/latest/download/kubectl-cost-linux-amd64 -o /usr/local/bin/kubectl-cost
+    - chmod +x /usr/local/bin/kubectl-cost
+
+    # Set up kubeconfig
+    - mkdir -p ~/.kube
+    - echo "$KUBECONFIG_DATA" | base64 -d > ~/.kube/config
+
+  script:
+    # Get current namespace costs
+    - |
+      NAMESPACE=$(grep -r "namespace:" . --include="*.yaml" --include="*.yml" | head -1 | awk '{print $2}' || echo "default")
+      echo "Analyzing namespace: $NAMESPACE"
+
+      # Get current cost baseline
+      kubectl cost namespace $NAMESPACE --prometheus-url $PROMETHEUS_URL --window 30d > current-cost.txt
+      cat current-cost.txt
+
+      CURRENT_COST=$(tail -1 current-cost.txt | awk '{print $4}' | tr -d '$' || echo "0")
+      echo "Current monthly cost: $${CURRENT_COST}"
+
+    # Analyze changed manifests
+    - |
+      git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+      CHANGED_FILES=$(git diff --name-only origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD | grep -E '\.ya?ml$' || true)
+
+      if [ -z "$CHANGED_FILES" ]; then
+        echo "No YAML manifests changed"
+        exit 0
+      fi
+
+      echo "Changed files:"
+      echo "$CHANGED_FILES"
+
+      # Calculate resource requirements
+      TOTAL_CPU=0
+      TOTAL_MEM=0
+
+      for file in $CHANGED_FILES; do
+        if grep -q "kind: Deployment\|kind: StatefulSet\|kind: DaemonSet" "$file"; then
+          CPU=$(grep -A 5 "resources:" "$file" | grep "cpu:" | head -1 | awk '{print $2}' | sed 's/m//' || echo "0")
+          MEM=$(grep -A 5 "resources:" "$file" | grep "memory:" "$file" | head -1 | awk '{print $2}' | sed 's/Mi//' || echo "0")
+          REPLICAS=$(grep "replicas:" "$file" | head -1 | awk '{print $2}' || echo "1")
+
+          TOTAL_CPU=$((TOTAL_CPU + CPU * REPLICAS))
+          TOTAL_MEM=$((TOTAL_MEM + MEM * REPLICAS))
+        fi
+      done
+
+      # Estimate costs
+      CPU_CORES=$(echo "scale=2; $TOTAL_CPU / 1000" | bc)
+      MEM_GB=$(echo "scale=2; $TOTAL_MEM / 1024" | bc)
+
+      CPU_COST=$(echo "scale=2; $CPU_CORES * 30" | bc)
+      MEM_COST=$(echo "scale=2; $MEM_GB * 4" | bc)
+      ESTIMATED_COST=$(echo "scale=2; $CPU_COST + $MEM_COST" | bc)
+
+      echo "Estimated resource requirements:"
+      echo "  CPU: ${CPU_CORES} cores"
+      echo "  Memory: ${MEM_GB} GB"
+      echo "  Estimated monthly cost: $${ESTIMATED_COST}"
+
+      # Calculate increase percentage
+      if [ "$CURRENT_COST" != "0" ]; then
+        INCREASE_PCT=$(echo "scale=2; (($ESTIMATED_COST / $CURRENT_COST) - 1) * 100" | bc)
+      else
+        INCREASE_PCT=0
+      fi
+
+      echo "Cost increase: ${INCREASE_PCT}%"
+
+      # Create MR comment
+      cat > cost-report.md <<EOF
+      ## 💰 Cost Impact Analysis
+
+      **Namespace:** \`$NAMESPACE\`
+
+      **Resource Requirements:**
+      - CPU: ${CPU_CORES} cores
+      - Memory: ${MEM_GB} GB
+
+      **Cost Estimate:**
+      - Current monthly cost: \$${CURRENT_COST}
+      - Estimated additional cost: \$${ESTIMATED_COST}
+      - Increase: ${INCREASE_PCT}%
+
+      EOF
+
+      if [ $(echo "$INCREASE_PCT > 20" | bc) -eq 1 ]; then
+        echo "⚠️ **Warning:** Cost increase exceeds 20%!" >> cost-report.md
+      else
+        echo "✅ Cost increase is within acceptable range." >> cost-report.md
+      fi
+
+      cat cost-report.md
+
+      # Fail if increase is too high
+      if [ $(echo "$INCREASE_PCT > 50" | bc) -eq 1 ]; then
+        echo "ERROR: Cost increase of ${INCREASE_PCT}% exceeds 50% threshold!"
+        exit 1
+      fi
+
+  artifacts:
+    paths:
+      - cost-report.md
+      - current-cost.txt
+    expire_in: 30 days
+
+  allow_failure: false

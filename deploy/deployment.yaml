@@ -1,0 +1,101 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-cost-exporter
+  namespace: kube-system
+  labels:
+    app: kube-cost-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-cost-exporter
+  template:
+    metadata:
+      labels:
+        app: kube-cost-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: kube-cost-exporter
+      containers:
+        - name: kube-cost-exporter
+          image: deepcost/kube-cost-exporter:latest
+          imagePullPolicy: Always
+          args:
+            - --cloud-provider=aws
+            - --region=us-east-1
+            - --update-interval=60s
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          env:
+            # AWS Configuration (using IRSA)
+            - name: AWS_REGION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['region']
+
+            # GCP Configuration (optional)
+            # - name: GCP_PROJECT
+            #   value: "your-gcp-project"
+
+            # Azure Configuration (optional)
+            # - name: AZURE_SUBSCRIPTION_ID
+            #   value: "your-subscription-id"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-cost-exporter
+  namespace: kube-system
+  labels:
+    app: kube-cost-exporter
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  selector:
+    app: kube-cost-exporter
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kube-cost-exporter
+  namespace: kube-system
+  labels:
+    app: kube-cost-exporter
+spec:
+  selector:
+    matchLabels:
+      app: kube-cost-exporter
+  endpoints:
+    - port: metrics
+      interval: 60s
+      path: /metrics
