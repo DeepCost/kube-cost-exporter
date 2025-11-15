@@ -131,12 +131,24 @@ See [Prometheus Query Examples](examples/prometheus-queries.md) for more.
 
 Pre-built dashboards included:
 
-- **Cost Overview**: Cluster-wide cost summary
-- **Namespace Deep Dive**: Per-namespace breakdown
-- **Spot Savings**: Spot vs on-demand analysis
-- **Top Spenders**: Most expensive pods and namespaces
+- **Cost Overview** (`dashboards/kubernetes-cost-overview.json`)
+  - Cluster-wide cost summary
+  - Per-namespace breakdown
+  - Most expensive pods and namespaces
+  - Cost trends over time
 
-Import from `dashboards/kubernetes-cost-overview.json`
+- **Spot Savings Analysis** (`dashboards/spot-savings-analysis.json`)
+  - Monthly spot instance savings
+  - Node distribution (spot vs on-demand)
+  - Spot percentage gauge
+  - Namespace-level spot usage
+  - Cost breakdown by instance type
+
+- **Storage Costs** (`dashboards/storage-costs.json`)
+  - Total storage costs
+  - Per-namespace storage breakdown
+  - Persistent volume cost analysis
+  - Storage capacity tracking
 
 ### 🚨 Cost Alerts
 
@@ -278,14 +290,36 @@ See [CI/CD Examples](examples/ci-cd/) for GitHub Actions and GitLab CI.
 
 ## Supported Metrics
 
+### Compute Metrics
+
 | Metric | Description | Labels |
 |--------|-------------|--------|
 | `kube_cost_pod_hourly_usd` | Hourly pod cost | namespace, pod, node |
 | `kube_cost_namespace_hourly_usd` | Hourly namespace cost | namespace |
+| `kube_cost_namespace_daily_usd` | Daily namespace cost | namespace |
 | `kube_cost_node_hourly_usd` | Hourly node cost | node, instance_type, is_spot |
-| `kube_cost_cluster_hourly_usd` | Total cluster cost | - |
-| `kube_cost_pv_monthly_usd` | Monthly PV cost | pv_name, storage_class |
-| `kube_cost_spot_savings_hourly_usd` | Spot savings | - |
+| `kube_cost_cluster_hourly_usd` | Total cluster hourly cost | - |
+
+### Storage Metrics
+
+| Metric | Description | Labels |
+|--------|-------------|--------|
+| `kube_cost_pv_monthly_usd` | Monthly persistent volume cost | pv_name, storage_class, namespace |
+| `kube_cost_namespace_storage_monthly_usd` | Monthly storage cost per namespace | namespace |
+| `kube_cost_cluster_storage_monthly_usd` | Total cluster monthly storage cost | - |
+
+### Spot Instance Metrics
+
+| Metric | Description | Labels |
+|--------|-------------|--------|
+| `kube_cost_spot_savings_hourly_usd` | Hourly savings from spot instances | - |
+| `kube_cost_spot_node_count` | Number of spot/preemptible nodes | - |
+| `kube_cost_ondemand_node_count` | Number of on-demand nodes | - |
+| `kube_cost_spot_percentage` | Percentage of nodes that are spot instances | - |
+| `kube_cost_spot_hourly_usd` | Hourly cost of all spot instances | - |
+| `kube_cost_ondemand_hourly_usd` | Hourly cost of all on-demand instances | - |
+| `kube_cost_namespace_spot_pods` | Number of pods on spot instances | namespace |
+| `kube_cost_namespace_spot_percentage` | Percentage of namespace pods on spot | namespace |
 
 ## Architecture
 

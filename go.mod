@@ -3,7 +3,7 @@ module github.com/deepcost/kube-cost-exporter
 go 1.21
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.24.0
+	github.com/aws/aws-sdk-go-v2 v1.25.0
 	github.com/aws/aws-sdk-go-v2/config v1.26.1
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.141.0
 	github.com/aws/aws-sdk-go-v2/service/pricing v1.26.0
@@ -17,3 +17,5 @@ require (
 	k8s.io/client-go v0.29.0
 	k8s.io/metrics v0.29.0
 )
+
+require gopkg.in/yaml.v3 v3.0.1 // indirect

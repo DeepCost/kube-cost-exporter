@@ -4,8 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -91,6 +95,25 @@ func main() {
 			os.Exit(1)
 		}
 
+	case "estimate":
+		var filename string
+		for i, arg := range flag.Args() {
+			if arg == "-f" || arg == "--file" {
+				if i+1 < len(flag.Args()) {
+					filename = flag.Args()[i+1]
+					break
+				}
+			}
+		}
+		if filename == "" {
+			fmt.Fprintln(os.Stderr, "Usage: kubectl cost estimate -f <manifest-file>")
+			os.Exit(1)
+		}
+		if err := estimateCost(filename); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		printUsage()
@@ -107,16 +130,19 @@ func printUsage() {
 	fmt.Println("  kubectl cost node [--window <duration>]")
 	fmt.Println("  kubectl cost cluster [--window <duration>]")
 	fmt.Println("  kubectl cost top <pods|namespaces|nodes> [--window <duration>]")
+	fmt.Println("  kubectl cost estimate -f <manifest-file>")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  --prometheus-url <url>    Prometheus server URL (default: http://localhost:9090)")
 	fmt.Println("  --window <duration>       Time window (default: 24h)")
+	fmt.Println("  -f, --file <path>         Manifest file to estimate (for estimate command)")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  kubectl cost namespace production --window 30d")
 	fmt.Println("  kubectl cost pod my-pod --namespace default")
 	fmt.Println("  kubectl cost cluster")
 	fmt.Println("  kubectl cost top namespaces")
+	fmt.Println("  kubectl cost estimate -f deployment.yaml")
 }
 
 func showNamespaceCost(ctx context.Context, api v1.API, namespace string) error {
@@ -373,4 +399,275 @@ func parseDuration(d string) time.Duration {
 		return 24 * time.Hour // Default to 24 hours
 	}
 	return duration
+}
+
+// ResourceEstimate represents estimated cost for a workload
+type ResourceEstimate struct {
+	Kind      string
+	Name      string
+	Namespace string
+	Replicas  int
+	CPUCores  float64
+	MemoryGB  float64
+	CPUCost   float64
+	MemCost   float64
+	TotalCost float64
+}
+
+func estimateCost(filename string) error {
+	// Read file
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+
+	// Split multi-doc YAML
+	docs := strings.Split(string(data), "---")
+	var estimates []ResourceEstimate
+
+	for _, doc := range docs {
+		doc = strings.TrimSpace(doc)
+		if doc == "" {
+			continue
+		}
+
+		estimate, err := estimateFromYAML([]byte(doc))
+		if err != nil {
+			// Skip non-workload resources
+			continue
+		}
+
+		estimates = append(estimates, estimate)
+	}
+
+	if len(estimates) == 0 {
+		return fmt.Errorf("no workload resources found in manifest")
+	}
+
+	// Display estimates
+	fmt.Println("Cost Estimate for Deployment")
+	fmt.Println("=============================")
+	fmt.Println()
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "KIND\tNAME\tREPLICAS\tCPU\tMEMORY\tHOURLY\tDAILY\tMONTHLY")
+
+	var totalHourly, totalDaily, totalMonthly float64
+
+	for _, est := range estimates {
+		hourly := est.TotalCost
+		daily := hourly * 24
+		monthly := hourly * 730
+
+		totalHourly += hourly
+		totalDaily += daily
+		totalMonthly += monthly
+
+		fmt.Fprintf(w, "%s\t%s\t%d\t%.2f\t%.2fGi\t$%.4f\t$%.2f\t$%.2f\n",
+			est.Kind, est.Name, est.Replicas, est.CPUCores, est.MemoryGB,
+			hourly, daily, monthly)
+	}
+
+	fmt.Fprintln(w, "")
+	fmt.Fprintf(w, "TOTAL\t\t\t\t\t$%.4f\t$%.2f\t$%.2f\n",
+		totalHourly, totalDaily, totalMonthly)
+
+	w.Flush()
+
+	fmt.Println()
+	fmt.Println("Note: Estimates based on average cloud provider pricing:")
+	fmt.Println("  - CPU: $30/vCPU/month (~$0.041/vCPU/hour)")
+	fmt.Println("  - Memory: $4/GB/month (~$0.0055/GB/hour)")
+	fmt.Println("  - Actual costs vary by region, instance type, and cloud provider")
+
+	return nil
+}
+
+func estimateFromYAML(data []byte) (ResourceEstimate, error) {
+	var manifest map[string]interface{}
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		return ResourceEstimate{}, err
+	}
+
+	kind, ok := manifest["kind"].(string)
+	if !ok {
+		return ResourceEstimate{}, fmt.Errorf("no kind found")
+	}
+
+	// Only process workload resources
+	validKinds := map[string]bool{
+		"Deployment":  true,
+		"StatefulSet": true,
+		"DaemonSet":   true,
+		"Job":         true,
+		"CronJob":     true,
+	}
+
+	if !validKinds[kind] {
+		return ResourceEstimate{}, fmt.Errorf("not a workload resource")
+	}
+
+	metadata, ok := manifest["metadata"].(map[string]interface{})
+	if !ok {
+		return ResourceEstimate{}, fmt.Errorf("no metadata found")
+	}
+
+	name, _ := metadata["name"].(string)
+	namespace, _ := metadata["namespace"].(string)
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	spec, ok := manifest["spec"].(map[string]interface{})
+	if !ok {
+		return ResourceEstimate{}, fmt.Errorf("no spec found")
+	}
+
+	// Get replicas
+	replicas := 1
+	if r, ok := spec["replicas"].(int); ok {
+		replicas = r
+	} else if r, ok := spec["replicas"].(float64); ok {
+		replicas = int(r)
+	}
+
+	// For CronJob, extract jobTemplate
+	if kind == "CronJob" {
+		if jobTemplate, ok := spec["jobTemplate"].(map[string]interface{}); ok {
+			spec = jobTemplate["spec"].(map[string]interface{})
+		}
+	}
+
+	// Get template
+	template, ok := spec["template"].(map[string]interface{})
+	if !ok {
+		return ResourceEstimate{}, fmt.Errorf("no template found")
+	}
+
+	templateSpec, ok := template["spec"].(map[string]interface{})
+	if !ok {
+		return ResourceEstimate{}, fmt.Errorf("no template spec found")
+	}
+
+	containers, ok := templateSpec["containers"].([]interface{})
+	if !ok {
+		return ResourceEstimate{}, fmt.Errorf("no containers found")
+	}
+
+	// Calculate total resources
+	var totalCPU, totalMem float64
+
+	for _, container := range containers {
+		cont, ok := container.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		resources, ok := cont["resources"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		requests, ok := resources["requests"].(map[string]interface{})
+		if !ok {
+			// Fall back to limits if no requests
+			requests, ok = resources["limits"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+		}
+
+		if cpu, ok := requests["cpu"].(string); ok {
+			totalCPU += parseCPU(cpu)
+		}
+
+		if mem, ok := requests["memory"].(string); ok {
+			totalMem += parseMemory(mem)
+		}
+	}
+
+	// Calculate costs (average cloud pricing)
+	// CPU: ~$30/vCPU/month = $0.041/vCPU/hour
+	// Memory: ~$4/GB/month = $0.0055/GB/hour
+	cpuCostPerHour := 30.0 / 730 // $30 per month / 730 hours
+	memCostPerHour := 4.0 / 730  // $4 per GB per month / 730 hours
+
+	totalCPU *= float64(replicas)
+	totalMem *= float64(replicas)
+
+	cpuCost := totalCPU * cpuCostPerHour
+	memCost := totalMem * memCostPerHour
+	totalCost := cpuCost + memCost
+
+	return ResourceEstimate{
+		Kind:      kind,
+		Name:      name,
+		Namespace: namespace,
+		Replicas:  replicas,
+		CPUCores:  totalCPU,
+		MemoryGB:  totalMem,
+		CPUCost:   cpuCost,
+		MemCost:   memCost,
+		TotalCost: totalCost,
+	}, nil
+}
+
+func parseCPU(cpu string) float64 {
+	// Handle millicores (e.g., "100m", "500m")
+	if strings.HasSuffix(cpu, "m") {
+		millis := strings.TrimSuffix(cpu, "m")
+		if val, err := strconv.ParseFloat(millis, 64); err == nil {
+			return val / 1000.0
+		}
+	}
+
+	// Handle cores (e.g., "1", "2.5")
+	if val, err := strconv.ParseFloat(cpu, 64); err == nil {
+		return val
+	}
+
+	return 0
+}
+
+func parseMemory(mem string) float64 {
+	// Remove spaces
+	mem = strings.TrimSpace(mem)
+
+	// Extract number and unit
+	re := regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*([A-Za-z]*)$`)
+	matches := re.FindStringSubmatch(mem)
+
+	if len(matches) != 3 {
+		return 0
+	}
+
+	value, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil {
+		return 0
+	}
+
+	unit := strings.ToUpper(matches[2])
+
+	// Convert to GB
+	switch unit {
+	case "K", "KI":
+		return value / (1024 * 1024)
+	case "M", "MI":
+		return value / 1024
+	case "G", "GI":
+		return value
+	case "T", "TI":
+		return value * 1024
+	case "KB":
+		return value / (1000 * 1000)
+	case "MB":
+		return value / 1000
+	case "GB":
+		return value
+	case "TB":
+		return value * 1000
+	default:
+		// Assume bytes
+		return value / (1024 * 1024 * 1024)
+	}
 }
