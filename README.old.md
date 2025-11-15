@@ -58,7 +58,7 @@ graph LR
 **Step 1: Quick Installation**
 ```bash
 # One-line install via Helm
-helm repo add deepcost https://charts.deepcost.ai
+helm repo add deepcost https://deepcost.github.io/kube-cost-exporter
 helm install kube-cost-exporter deepcost/kube-cost-exporter \
   --set cloudProvider=aws \
   --set prometheusEndpoint=http://prometheus:9090

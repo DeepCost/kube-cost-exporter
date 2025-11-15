@@ -17,7 +17,7 @@ This guide provides detailed instructions for installing and configuring Kube Co
 #### 1. Add Helm Repository
 
 ```bash
-helm repo add deepcost https://charts.deepcost.ai
+helm repo add deepcost https://deepcost.github.io/kube-cost-exporter
 helm repo update
 ```
 

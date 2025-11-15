@@ -15,7 +15,7 @@ Get Kube Cost Exporter up and running in 5 minutes!
 
 ```bash
 # Add Helm repository
-helm repo add deepcost https://charts.deepcost.ai
+helm repo add deepcost https://deepcost.github.io/kube-cost-exporter
 helm repo update
 
 # Install the chart

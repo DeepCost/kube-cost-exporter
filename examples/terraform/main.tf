@@ -99,7 +99,7 @@ resource "aws_iam_role_policy" "kube_cost_exporter" {
 # Deploy Kube Cost Exporter via Helm
 resource "helm_release" "kube_cost_exporter" {
   name       = "kube-cost-exporter"
-  repository = "https://charts.deepcost.ai"
+  repository = "https://deepcost.github.io/kube-cost-exporter"
   chart      = "kube-cost-exporter"
   version    = var.chart_version
   namespace  = "kube-system"

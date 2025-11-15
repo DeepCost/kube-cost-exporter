@@ -41,7 +41,7 @@ Kube Cost Exporter is a lightweight, open-source tool that tracks your Kubernete
 #### AWS (EKS)
 
 ```bash
-helm repo add deepcost https://charts.deepcost.ai
+helm repo add deepcost https://deepcost.github.io/kube-cost-exporter
 helm repo update
 
 helm install kube-cost-exporter deepcost/kube-cost-exporter \
