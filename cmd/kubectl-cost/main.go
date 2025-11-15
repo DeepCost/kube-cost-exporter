@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -374,7 +373,7 @@ func showTopCosts(ctx context.Context, api v1.API, resource string) error {
 	} else {
 		fmt.Fprintln(w, "RANK\tNAME\tHOURLY COST\tMONTHLY PROJECTION")
 		for i, sample := range vector {
-			name := string(sample.Metric[labelName])
+			name := string(sample.Metric[model.LabelName(labelName)])
 			hourlyCost := float64(sample.Value)
 			monthlyCost := hourlyCost * 730
 
