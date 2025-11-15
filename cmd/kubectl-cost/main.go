@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -358,7 +357,12 @@ func showTopCosts(ctx context.Context, api v1.API, resource string) error {
 		return vector[i].Value > vector[j].Value
 	})
 
-	fmt.Printf("Top 10 %s by cost:\n\n", strings.Title(resource))
+	// Capitalize first letter of resource name
+	resourceTitle := resource
+	if len(resource) > 0 {
+		resourceTitle = strings.ToUpper(resource[:1]) + resource[1:]
+	}
+	fmt.Printf("Top 10 %s by cost:\n\n", resourceTitle)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	if resource == "pods" {
@@ -374,7 +378,7 @@ func showTopCosts(ctx context.Context, api v1.API, resource string) error {
 	} else {
 		fmt.Fprintln(w, "RANK\tNAME\tHOURLY COST\tMONTHLY PROJECTION")
 		for i, sample := range vector {
-			name := string(sample.Metric[labelName])
+			name := string(sample.Metric[model.LabelName(labelName)])
 			hourlyCost := float64(sample.Value)
 			monthlyCost := hourlyCost * 730
 
@@ -392,9 +396,10 @@ func parseDuration(d string) time.Duration {
 		// Try parsing as "30d" format
 		if strings.HasSuffix(d, "d") {
 			days := strings.TrimSuffix(d, "d")
-			var daysInt int
-			fmt.Sscanf(days, "%d", &daysInt)
-			return time.Duration(daysInt) * 24 * time.Hour
+			daysInt, err := strconv.Atoi(days)
+			if err == nil {
+				return time.Duration(daysInt) * 24 * time.Hour
+			}
 		}
 		return 24 * time.Hour // Default to 24 hours
 	}

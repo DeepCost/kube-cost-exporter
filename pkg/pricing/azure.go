@@ -2,7 +2,6 @@ package pricing
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/sirupsen/logrus"
