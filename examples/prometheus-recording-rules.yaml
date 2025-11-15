@@ -1,0 +1,153 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-cost-recording-rules
+  namespace: monitoring
+data:
+  kube-cost-recording-rules.yaml: |
+    groups:
+      - name: kube_cost_recording_rules
+        interval: 60s
+        rules:
+          # Namespace cost aggregations
+          - record: namespace:kube_cost_hourly:sum
+            expr: sum(kube_cost_namespace_hourly_usd) by (namespace)
+
+          - record: namespace:kube_cost_daily:sum
+            expr: sum(kube_cost_namespace_daily_usd) by (namespace)
+
+          - record: namespace:kube_cost_monthly:sum
+            expr: sum(kube_cost_namespace_daily_usd) by (namespace) * 30
+
+          # Cluster-wide cost aggregations
+          - record: cluster:kube_cost_hourly:sum
+            expr: sum(kube_cost_cluster_hourly_usd)
+
+          - record: cluster:kube_cost_daily:sum
+            expr: sum(kube_cost_cluster_hourly_usd) * 24
+
+          - record: cluster:kube_cost_monthly:sum
+            expr: sum(kube_cost_cluster_hourly_usd) * 730
+
+          # Storage cost aggregations
+          - record: cluster:storage_cost_monthly:sum
+            expr: sum(kube_cost_cluster_storage_monthly_usd)
+
+          - record: namespace:storage_cost_monthly:sum
+            expr: sum(kube_cost_namespace_storage_monthly_usd) by (namespace)
+
+          # Spot instance metrics
+          - record: cluster:spot_savings_hourly:sum
+            expr: sum(kube_cost_spot_savings_hourly_usd)
+
+          - record: cluster:spot_savings_monthly:sum
+            expr: sum(kube_cost_spot_savings_hourly_usd) * 730
+
+          - record: cluster:spot_percentage:ratio
+            expr: |
+              (
+                sum(kube_cost_spot_savings_hourly_usd) /
+                (sum(kube_cost_cluster_hourly_usd) + sum(kube_cost_spot_savings_hourly_usd))
+              ) * 100
+
+          # Node count by type
+          - record: cluster:node_count:total
+            expr: count(kube_cost_node_hourly_usd)
+
+          - record: cluster:node_count_by_type:total
+            expr: count(kube_cost_node_hourly_usd) by (instance_type)
+
+          - record: cluster:spot_node_count:total
+            expr: count(kube_cost_node_hourly_usd{is_spot="true"})
+
+          # Pod count and costs
+          - record: namespace:pod_count:total
+            expr: count(kube_cost_pod_hourly_usd) by (namespace)
+
+          - record: cluster:pod_count:total
+            expr: count(kube_cost_pod_hourly_usd)
+
+          - record: namespace:pod_cost_avg:avg
+            expr: avg(kube_cost_pod_hourly_usd) by (namespace)
+
+          # Cost efficiency metrics
+          - record: namespace:cost_per_pod:ratio
+            expr: |
+              sum(kube_cost_namespace_hourly_usd) by (namespace) /
+              count(kube_cost_pod_hourly_usd) by (namespace)
+
+          # Top cost contributors (updated every minute)
+          - record: namespace:top5_cost:sum
+            expr: topk(5, sum(kube_cost_namespace_hourly_usd) by (namespace))
+
+          - record: pod:top10_cost:gauge
+            expr: topk(10, kube_cost_pod_hourly_usd)
+
+          # Cost trends (24h average)
+          - record: namespace:kube_cost_hourly_24h:avg
+            expr: avg_over_time(sum(kube_cost_namespace_hourly_usd) by (namespace)[24h:1h])
+
+          - record: cluster:kube_cost_hourly_24h:avg
+            expr: avg_over_time(sum(kube_cost_cluster_hourly_usd)[24h:1h])
+
+          # Cost change percentage (vs 24h ago)
+          - record: cluster:cost_change_24h:percent
+            expr: |
+              (
+                (sum(kube_cost_cluster_hourly_usd) - sum(kube_cost_cluster_hourly_usd offset 24h)) /
+                sum(kube_cost_cluster_hourly_usd offset 24h)
+              ) * 100
+
+          - record: namespace:cost_change_24h:percent
+            expr: |
+              (
+                (sum(kube_cost_namespace_hourly_usd) by (namespace) - sum(kube_cost_namespace_hourly_usd offset 24h) by (namespace)) /
+                sum(kube_cost_namespace_hourly_usd offset 24h) by (namespace)
+              ) * 100
+
+          # Total cost (compute + storage)
+          - record: cluster:total_cost_hourly:sum
+            expr: sum(kube_cost_cluster_hourly_usd) + (sum(kube_cost_cluster_storage_monthly_usd) / 730)
+
+          - record: cluster:total_cost_monthly:sum
+            expr: (sum(kube_cost_cluster_hourly_usd) * 730) + sum(kube_cost_cluster_storage_monthly_usd)
+
+          - record: namespace:total_cost_monthly:sum
+            expr: |
+              (sum(kube_cost_namespace_hourly_usd) by (namespace) * 730) +
+              sum(kube_cost_namespace_storage_monthly_usd) by (namespace)
+
+          # Cost by instance type
+          - record: instance_type:cost_hourly:sum
+            expr: sum(kube_cost_node_hourly_usd) by (instance_type)
+
+          - record: instance_type:cost_monthly:sum
+            expr: sum(kube_cost_node_hourly_usd) by (instance_type) * 730
+
+          # Storage class costs
+          - record: storage_class:cost_monthly:sum
+            expr: sum(kube_cost_storage_class_monthly_usd) by (storage_class)
+
+          # Forecasting (7-day average for projections)
+          - record: cluster:cost_forecast_monthly:avg
+            expr: avg_over_time(sum(kube_cost_cluster_hourly_usd)[7d:1h]) * 730
+
+          - record: namespace:cost_forecast_monthly:avg
+            expr: avg_over_time(sum(kube_cost_namespace_hourly_usd) by (namespace)[7d:1h]) * 730
+
+          # Idle cost estimation (nodes with low pod allocation)
+          - record: cluster:idle_cost_estimate:sum
+            expr: |
+              sum(kube_cost_node_hourly_usd) -
+              sum(kube_cost_pod_hourly_usd)
+
+          # Cost per resource unit
+          - record: cluster:cost_per_cpu_core_hourly:ratio
+            expr: |
+              sum(kube_cost_cluster_hourly_usd) /
+              sum(kube_node_status_capacity{resource="cpu"})
+
+          - record: cluster:cost_per_gb_memory_hourly:ratio
+            expr: |
+              sum(kube_cost_cluster_hourly_usd) /
+              (sum(kube_node_status_capacity{resource="memory"}) / 1024 / 1024 / 1024)

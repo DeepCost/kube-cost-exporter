@@ -82,15 +82,20 @@ func main() {
 	// Initialize collectors
 	nodeCollector := collector.NewNodeCollector(clientset, pricingCache, *cloudProvider, *region)
 	podCollector := collector.NewPodCollector(clientset)
+	storageCollector := collector.NewStorageCollector(clientset, pricingCache, *cloudProvider, *region)
 
 	// Initialize calculator and metrics exporter
 	calc := calculator.NewCostCalculator()
 	exporter := metrics.NewExporter()
+	storageMetrics := metrics.NewStorageMetrics()
 
 	// Create custom registry
 	registry := prometheus.NewRegistry()
 	if err := exporter.Register(registry); err != nil {
 		logger.Fatalf("Failed to register metrics: %v", err)
+	}
+	if err := storageMetrics.Register(registry); err != nil {
+		logger.Fatalf("Failed to register storage metrics: %v", err)
 	}
 
 	// Start metrics HTTP server
@@ -113,11 +118,11 @@ func main() {
 	defer ticker.Stop()
 
 	// Run immediately on startup
-	collectAndExportMetrics(ctx, nodeCollector, podCollector, calc, exporter)
+	collectAndExportMetrics(ctx, nodeCollector, podCollector, storageCollector, calc, exporter, storageMetrics)
 
 	// Then run on schedule
 	for range ticker.C {
-		collectAndExportMetrics(ctx, nodeCollector, podCollector, calc, exporter)
+		collectAndExportMetrics(ctx, nodeCollector, podCollector, storageCollector, calc, exporter, storageMetrics)
 	}
 }
 
@@ -125,8 +130,10 @@ func collectAndExportMetrics(
 	ctx context.Context,
 	nodeCollector *collector.NodeCollector,
 	podCollector *collector.PodCollector,
+	storageCollector *collector.StorageCollector,
 	calc *calculator.CostCalculator,
 	exporter *metrics.Exporter,
+	storageMetrics *metrics.StorageMetrics,
 ) {
 	logger.Info("Collecting cost metrics...")
 
@@ -175,6 +182,32 @@ func collectAndExportMetrics(
 	// Calculate cluster metrics
 	totalCost := calc.CalculateTotalClusterCost(nodes)
 	spotSavings := calc.CalculateSpotSavings(nodes)
+
+	// Collect storage (PVs)
+	pvs, err := storageCollector.CollectPVs(ctx)
+	if err != nil {
+		logger.Warnf("Failed to collect storage: %v", err)
+	} else {
+		logger.Infof("Collected %d persistent volumes", len(pvs))
+
+		// Calculate storage costs
+		var storageCosts []calculator.StorageCost
+		for _, pv := range pvs {
+			cost := calc.CalculateStorageCost(pv)
+			storageCosts = append(storageCosts, cost)
+		}
+
+		// Calculate namespace storage costs
+		namespaceStorageCosts := calc.CalculateNamespaceStorageCosts(storageCosts)
+		totalStorageCost := calc.CalculateTotalStorageCost(pvs)
+
+		// Update storage metrics
+		storageMetrics.UpdatePVMetrics(storageCosts)
+		storageMetrics.UpdateNamespaceStorageMetrics(namespaceStorageCosts)
+		storageMetrics.UpdateClusterStorageMetrics(totalStorageCost)
+
+		logger.Infof("Storage metrics updated. Total monthly storage cost: $%.2f", totalStorageCost)
+	}
 
 	// Update Prometheus metrics
 	exporter.UpdatePodMetrics(podCosts)
