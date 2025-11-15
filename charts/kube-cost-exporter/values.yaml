@@ -1,0 +1,101 @@
+# Default values for kube-cost-exporter
+
+# Cloud provider configuration
+cloudProvider: aws  # aws, gcp, or azure
+
+# AWS specific configuration
+aws:
+  region: us-east-1
+  # IRSA role ARN (for EKS)
+  irsaRoleArn: ""
+
+# GCP specific configuration
+gcp:
+  project: ""
+  # Workload Identity (for GKE)
+  workloadIdentity: ""
+
+# Azure specific configuration
+azure:
+  subscriptionId: ""
+  # Managed Identity Client ID
+  managedIdentityClientId: ""
+
+# Application settings
+updateInterval: 60s  # How often to collect and update metrics
+
+# Image configuration
+image:
+  repository: deepcost/kube-cost-exporter
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Service account configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 9090
+  annotations: {}
+
+# Resources
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Prometheus ServiceMonitor
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  scrapeTimeout: 30s
+  labels: {}
+
+# Grafana dashboard
+grafanaDashboard:
+  enabled: true
+  namespace: ""  # Leave empty to use release namespace
+
+# RBAC
+rbac:
+  create: true

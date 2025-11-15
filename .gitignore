@@ -1,0 +1,37 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build artifacts
+kube-cost-exporter
+kube-cost-agent
+kube-cost-aggregator
+
+# Go
+*.test
+*.out
+vendor/
+go.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kubernetes
+*.kubeconfig
+
+# Secrets and credentials
+*.pem
+*.key
+credentials.json
+.env
