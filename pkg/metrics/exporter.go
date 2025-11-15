@@ -12,10 +12,17 @@ type Exporter struct {
 	podHourlyCost       *prometheus.GaugeVec
 	namespaceHourlyCost *prometheus.GaugeVec
 	namespaceDailyCost  *prometheus.GaugeVec
-	nodeHourlyCost      *prometheus.GaugeVec
-	spotSavings         prometheus.Gauge
-	clusterHourlyCost   prometheus.Gauge
-	logger              *logrus.Logger
+	nodeHourlyCost          *prometheus.GaugeVec
+	spotSavings             prometheus.Gauge
+	clusterHourlyCost       prometheus.Gauge
+	spotNodeCount           prometheus.Gauge
+	onDemandNodeCount       prometheus.Gauge
+	spotPercentage          prometheus.Gauge
+	spotCostHourly          prometheus.Gauge
+	onDemandCostHourly      prometheus.Gauge
+	namespaceSpotUsage      *prometheus.GaugeVec
+	namespaceSpotPercentage *prometheus.GaugeVec
+	logger                  *logrus.Logger
 }
 
 // NewExporter creates a new metrics exporter
@@ -64,6 +71,50 @@ func NewExporter() *Exporter {
 				Help: "Total hourly cost of the cluster in USD",
 			},
 		),
+		spotNodeCount: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "kube_cost_spot_node_count",
+				Help: "Number of spot/preemptible nodes",
+			},
+		),
+		onDemandNodeCount: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "kube_cost_ondemand_node_count",
+				Help: "Number of on-demand nodes",
+			},
+		),
+		spotPercentage: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "kube_cost_spot_percentage",
+				Help: "Percentage of nodes that are spot instances",
+			},
+		),
+		spotCostHourly: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "kube_cost_spot_hourly_usd",
+				Help: "Hourly cost of spot instances in USD",
+			},
+		),
+		onDemandCostHourly: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "kube_cost_ondemand_hourly_usd",
+				Help: "Hourly cost of on-demand instances in USD",
+			},
+		),
+		namespaceSpotUsage: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "kube_cost_namespace_spot_pods",
+				Help: "Number of pods on spot instances per namespace",
+			},
+			[]string{"namespace"},
+		),
+		namespaceSpotPercentage: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "kube_cost_namespace_spot_percentage",
+				Help: "Percentage of namespace pods on spot instances",
+			},
+			[]string{"namespace"},
+		),
 		logger: logger,
 	}
 }
@@ -86,6 +137,27 @@ func (e *Exporter) Register(registry *prometheus.Registry) error {
 		return err
 	}
 	if err := registry.Register(e.clusterHourlyCost); err != nil {
+		return err
+	}
+	if err := registry.Register(e.spotNodeCount); err != nil {
+		return err
+	}
+	if err := registry.Register(e.onDemandNodeCount); err != nil {
+		return err
+	}
+	if err := registry.Register(e.spotPercentage); err != nil {
+		return err
+	}
+	if err := registry.Register(e.spotCostHourly); err != nil {
+		return err
+	}
+	if err := registry.Register(e.onDemandCostHourly); err != nil {
+		return err
+	}
+	if err := registry.Register(e.namespaceSpotUsage); err != nil {
+		return err
+	}
+	if err := registry.Register(e.namespaceSpotPercentage); err != nil {
 		return err
 	}
 	return nil
@@ -153,4 +225,36 @@ func (e *Exporter) UpdateClusterMetrics(totalCost, spotSavings float64) {
 	e.spotSavings.Set(spotSavings)
 
 	e.logger.Infof("Updated cluster metrics: total=$%.2f/hr, spot savings=$%.2f/hr", totalCost, spotSavings)
+}
+
+// UpdateDetailedSpotMetrics updates detailed spot instance metrics
+func (e *Exporter) UpdateDetailedSpotMetrics(spotSavings calculator.SpotSavings) {
+	e.spotSavings.Set(spotSavings.TotalSavingsHourly)
+	e.spotNodeCount.Set(float64(spotSavings.SpotNodeCount))
+	e.onDemandNodeCount.Set(float64(spotSavings.OnDemandNodeCount))
+	e.spotPercentage.Set(spotSavings.SpotPercentage)
+	e.spotCostHourly.Set(spotSavings.SpotCostHourly)
+	e.onDemandCostHourly.Set(spotSavings.OnDemandCostHourly)
+
+	e.logger.Infof("Updated detailed spot metrics: %d spot nodes (%.1f%%), $%.2f/hr savings",
+		spotSavings.SpotNodeCount, spotSavings.SpotPercentage, spotSavings.TotalSavingsHourly)
+}
+
+// UpdateNamespaceSpotMetrics updates namespace-level spot usage metrics
+func (e *Exporter) UpdateNamespaceSpotMetrics(namespaceSpotUsage []calculator.NamespaceSpotUsage) {
+	// Reset existing metrics
+	e.namespaceSpotUsage.Reset()
+	e.namespaceSpotPercentage.Reset()
+
+	for _, nsSpot := range namespaceSpotUsage {
+		e.namespaceSpotUsage.With(prometheus.Labels{
+			"namespace": nsSpot.Namespace,
+		}).Set(float64(nsSpot.PodsOnSpot))
+
+		e.namespaceSpotPercentage.With(prometheus.Labels{
+			"namespace": nsSpot.Namespace,
+		}).Set(nsSpot.SpotPercentage)
+	}
+
+	e.logger.Infof("Updated spot metrics for %d namespaces", len(namespaceSpotUsage))
 }

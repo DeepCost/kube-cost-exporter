@@ -126,6 +126,42 @@ metrics: ## Query metrics endpoint
 	curl -s http://localhost:9090/metrics | grep kube_cost
 	pkill -f "port-forward.*$(APP_NAME)"
 
+build-plugin: ## Build kubectl-cost plugin for all platforms
+	@echo "$(GREEN)Building kubectl-cost plugin for all platforms...$(NC)"
+	@mkdir -p $(BUILD_DIR)
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -ldflags="-w -s -X main.Version=$(VERSION)" -o $(BUILD_DIR)/kubectl-cost-linux-amd64 ./cmd/kubectl-cost
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) -ldflags="-w -s -X main.Version=$(VERSION)" -o $(BUILD_DIR)/kubectl-cost-linux-arm64 ./cmd/kubectl-cost
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -ldflags="-w -s -X main.Version=$(VERSION)" -o $(BUILD_DIR)/kubectl-cost-darwin-amd64 ./cmd/kubectl-cost
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GOBUILD) -ldflags="-w -s -X main.Version=$(VERSION)" -o $(BUILD_DIR)/kubectl-cost-darwin-arm64 ./cmd/kubectl-cost
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 $(GOBUILD) -ldflags="-w -s -X main.Version=$(VERSION)" -o $(BUILD_DIR)/kubectl-cost-windows-amd64.exe ./cmd/kubectl-cost
+	@echo "$(GREEN)Plugin binaries built in $(BUILD_DIR)/$(NC)"
+	@ls -lh $(BUILD_DIR)/kubectl-cost-*
+
+install-plugin: ## Install kubectl-cost plugin locally
+	@echo "$(GREEN)Installing kubectl-cost plugin...$(NC)"
+	GOOS=$$(go env GOOS) GOARCH=$$(go env GOARCH) CGO_ENABLED=0 $(GOBUILD) -ldflags="-w -s -X main.Version=$(VERSION)" -o kubectl-cost ./cmd/kubectl-cost
+	chmod +x kubectl-cost
+	sudo mv kubectl-cost /usr/local/bin/
+	@echo "$(GREEN)Plugin installed to /usr/local/bin/kubectl-cost$(NC)"
+	@echo "$(YELLOW)Test it with: kubectl cost --help$(NC)"
+
+release-check: ## Check if ready for release
+	@echo "$(GREEN)Checking release readiness...$(NC)"
+	@echo "Checking git status..."
+	@git diff-index --quiet HEAD -- || (echo "$(RED)ERROR: Uncommitted changes$(NC)" && exit 1)
+	@echo "Running tests..."
+	@$(MAKE) test
+	@echo "Linting..."
+	@$(MAKE) lint
+	@echo "$(GREEN)✓ Ready for release$(NC)"
+
+release-tag: release-check ## Create a release tag
+	@echo "$(GREEN)Creating release tag...$(NC)"
+	@read -p "Enter version (e.g., 1.2.3): " version; \
+	git tag -a "v$$version" -m "Release v$$version"; \
+	echo "$(GREEN)Tag v$$version created$(NC)"; \
+	echo "$(YELLOW)Push with: git push origin v$$version$(NC)"
+
 clean: ## Clean build artifacts
 	@echo "$(YELLOW)Cleaning build artifacts...$(NC)"
 	$(GOCLEAN)

@@ -112,6 +112,18 @@ func (cc *CostCalculator) CalculateNamespaceCosts(podCosts []PodCost) []Namespac
 	return namespaceCosts
 }
 
+// SpotSavings contains detailed spot instance savings information
+type SpotSavings struct {
+	TotalSavingsHourly   float64
+	TotalSavingsMonthly  float64
+	SpotNodeCount        int
+	OnDemandNodeCount    int
+	SpotPercentage       float64
+	SpotCostHourly       float64
+	OnDemandCostHourly   float64
+	EstimatedSavingsRate float64 // Percentage saved by using spot
+}
+
 // CalculateSpotSavings calculates the savings from using spot instances
 func (cc *CostCalculator) CalculateSpotSavings(nodes []collector.NodeInfo) float64 {
 	var totalSavings float64
@@ -126,6 +138,103 @@ func (cc *CostCalculator) CalculateSpotSavings(nodes []collector.NodeInfo) float
 	}
 
 	return totalSavings
+}
+
+// CalculateDetailedSpotSavings provides comprehensive spot instance savings analysis
+func (cc *CostCalculator) CalculateDetailedSpotSavings(nodes []collector.NodeInfo) SpotSavings {
+	var spotCost, onDemandCost, totalEstimatedOnDemand float64
+	var spotCount, onDemandCount int
+
+	for _, node := range nodes {
+		if node.IsSpot {
+			spotCost += node.HourlyPrice
+			spotCount++
+			// Estimate what it would cost on on-demand
+			// Spot is typically 70% cheaper (30% of on-demand price)
+			estimatedOnDemand := node.HourlyPrice / 0.30
+			totalEstimatedOnDemand += estimatedOnDemand
+		} else {
+			onDemandCost += node.HourlyPrice
+			onDemandCount++
+		}
+	}
+
+	totalNodes := spotCount + onDemandCount
+	spotPercentage := 0.0
+	if totalNodes > 0 {
+		spotPercentage = (float64(spotCount) / float64(totalNodes)) * 100
+	}
+
+	totalSavings := totalEstimatedOnDemand - spotCost
+	savingsRate := 0.0
+	if totalEstimatedOnDemand > 0 {
+		savingsRate = (totalSavings / totalEstimatedOnDemand) * 100
+	}
+
+	return SpotSavings{
+		TotalSavingsHourly:   totalSavings,
+		TotalSavingsMonthly:  totalSavings * 730,
+		SpotNodeCount:        spotCount,
+		OnDemandNodeCount:    onDemandCount,
+		SpotPercentage:       spotPercentage,
+		SpotCostHourly:       spotCost,
+		OnDemandCostHourly:   onDemandCost,
+		EstimatedSavingsRate: savingsRate,
+	}
+}
+
+// NamespaceSpotUsage contains spot instance usage for a namespace
+type NamespaceSpotUsage struct {
+	Namespace     string
+	PodsOnSpot    int
+	PodsOnDemand  int
+	SpotCost      float64
+	OnDemandCost  float64
+	SpotPercentage float64
+}
+
+// CalculateNamespaceSpotUsage calculates spot instance usage per namespace
+func (cc *CostCalculator) CalculateNamespaceSpotUsage(podCosts []PodCost, nodes []collector.NodeInfo) []NamespaceSpotUsage {
+	// Create node lookup map
+	nodeMap := make(map[string]bool)
+	for _, node := range nodes {
+		nodeMap[node.Name] = node.IsSpot
+	}
+
+	// Track by namespace
+	nsMap := make(map[string]*NamespaceSpotUsage)
+
+	for _, pod := range podCosts {
+		isSpot := nodeMap[pod.NodeName]
+
+		ns, exists := nsMap[pod.Namespace]
+		if !exists {
+			ns = &NamespaceSpotUsage{
+				Namespace: pod.Namespace,
+			}
+			nsMap[pod.Namespace] = ns
+		}
+
+		if isSpot {
+			ns.PodsOnSpot++
+			ns.SpotCost += pod.HourlyCost
+		} else {
+			ns.PodsOnDemand++
+			ns.OnDemandCost += pod.HourlyCost
+		}
+	}
+
+	// Calculate percentages and convert to slice
+	var result []NamespaceSpotUsage
+	for _, ns := range nsMap {
+		totalPods := ns.PodsOnSpot + ns.PodsOnDemand
+		if totalPods > 0 {
+			ns.SpotPercentage = (float64(ns.PodsOnSpot) / float64(totalPods)) * 100
+		}
+		result = append(result, *ns)
+	}
+
+	return result
 }
 
 // CalculateTotalClusterCost calculates the total cluster cost

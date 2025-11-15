@@ -241,6 +241,208 @@ kube-cost-exporter/
 └── docs/               # Documentation
 ```
 
+## Release Process
+
+### Overview
+
+Kube Cost Exporter uses semantic versioning (SemVer) and automated releases through GitHub Actions.
+
+### Release Types
+
+- **Patch Release** (v1.0.X): Bug fixes, minor improvements
+- **Minor Release** (v1.X.0): New features, backwards-compatible changes
+- **Major Release** (vX.0.0): Breaking changes, major features
+
+### Creating a Release
+
+#### 1. Prepare the Release
+
+```bash
+# Ensure you're on main branch
+git checkout main
+git pull origin main
+
+# Update CHANGELOG.md with release notes
+# Update version in charts/kube-cost-exporter/Chart.yaml
+
+# Commit version changes
+git add CHANGELOG.md charts/kube-cost-exporter/Chart.yaml
+git commit -m "chore: prepare release v1.2.3"
+git push origin main
+```
+
+#### 2. Create a Git Tag
+
+```bash
+# Create an annotated tag
+git tag -a v1.2.3 -m "Release v1.2.3"
+
+# Push the tag to trigger release workflows
+git push origin v1.2.3
+```
+
+#### 3. Automated Release Process
+
+When you push a tag (e.g., `v1.2.3`), GitHub Actions automatically:
+
+1. **Docker Image Release**:
+   - Builds multi-arch Docker images (amd64, arm64)
+   - Pushes to `deepcost/kube-cost-exporter:1.2.3`
+   - Pushes to `deepcost/kube-cost-exporter:latest`
+   - Creates GitHub release with changelog
+
+2. **Helm Chart Release**:
+   - Updates Chart.yaml with version
+   - Packages the Helm chart
+   - Publishes to GitHub Pages (gh-pages branch)
+   - Available at `https://deepcost.github.io/kube-cost-exporter`
+
+3. **kubectl Plugin Release**:
+   - Builds kubectl-cost for multiple platforms
+   - Attaches binaries to GitHub release
+
+### Manual Release (If Needed)
+
+#### Docker Image
+
+```bash
+# Build multi-arch image
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t deepcost/kube-cost-exporter:v1.2.3 \
+  -t deepcost/kube-cost-exporter:latest \
+  --push .
+```
+
+#### Helm Chart
+
+```bash
+# Package the chart
+helm package charts/kube-cost-exporter
+
+# Checkout gh-pages branch
+git checkout gh-pages
+
+# Add the packaged chart
+mv kube-cost-exporter-1.2.3.tgz .
+
+# Update index
+helm repo index . --url https://deepcost.github.io/kube-cost-exporter
+
+# Commit and push
+git add .
+git commit -m "Release chart version 1.2.3"
+git push origin gh-pages
+
+# Return to main branch
+git checkout main
+```
+
+#### kubectl Plugin
+
+```bash
+# Build for all platforms
+make build-plugin
+
+# Binaries will be in bin/:
+# - kubectl-cost-linux-amd64
+# - kubectl-cost-linux-arm64
+# - kubectl-cost-darwin-amd64
+# - kubectl-cost-darwin-arm64
+# - kubectl-cost-windows-amd64.exe
+```
+
+### Release Checklist
+
+Before creating a release, ensure:
+
+- [ ] All tests pass (`make check`)
+- [ ] Documentation is updated
+- [ ] CHANGELOG.md is updated with release notes
+- [ ] Version numbers are updated in:
+  - [ ] `charts/kube-cost-exporter/Chart.yaml` (version and appVersion)
+  - [ ] Any version constants in code
+- [ ] Breaking changes are documented
+- [ ] Migration guide is provided (if needed)
+- [ ] Security vulnerabilities are addressed
+
+### Post-Release
+
+After a release is published:
+
+1. **Verify Docker Image**:
+   ```bash
+   docker pull deepcost/kube-cost-exporter:v1.2.3
+   docker run --rm deepcost/kube-cost-exporter:v1.2.3 --version
+   ```
+
+2. **Verify Helm Chart**:
+   ```bash
+   helm repo update
+   helm search repo deepcost/kube-cost-exporter --versions
+   ```
+
+3. **Update Documentation**:
+   - Update installation guides with new version
+   - Publish blog post for major releases
+   - Announce on community channels
+
+4. **Monitor**:
+   - Watch for issues related to the new release
+   - Monitor Docker Hub download stats
+   - Check Helm chart usage metrics
+
+### Hotfix Releases
+
+For critical bugs in production:
+
+1. Create a hotfix branch from the release tag:
+   ```bash
+   git checkout -b hotfix/v1.2.4 v1.2.3
+   ```
+
+2. Fix the bug and commit:
+   ```bash
+   git commit -m "fix: critical bug in cost calculation"
+   ```
+
+3. Create a new patch tag:
+   ```bash
+   git tag -a v1.2.4 -m "Hotfix: critical bug fix"
+   git push origin v1.2.4
+   ```
+
+4. Merge hotfix back to main:
+   ```bash
+   git checkout main
+   git merge hotfix/v1.2.4
+   git push origin main
+   ```
+
+### Release Notes Template
+
+```markdown
+## [v1.2.3] - 2024-01-15
+
+### Added
+- New feature X that does Y
+- Support for Z cloud provider
+
+### Changed
+- Improved performance of cost calculation by 30%
+- Updated dependencies to latest versions
+
+### Fixed
+- Fixed bug where spot instance prices were incorrect
+- Resolved memory leak in pricing cache
+
+### Security
+- Updated vulnerable dependency X to v2.0.0
+
+### Breaking Changes
+- Configuration parameter `oldParam` renamed to `newParam`
+  - Migration: Update your values.yaml to use `newParam`
+```
+
 ## Getting Help
 
 - Open an issue for bugs or feature requests

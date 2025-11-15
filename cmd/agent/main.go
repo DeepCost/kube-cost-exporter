@@ -181,7 +181,8 @@ func collectAndExportMetrics(
 
 	// Calculate cluster metrics
 	totalCost := calc.CalculateTotalClusterCost(nodes)
-	spotSavings := calc.CalculateSpotSavings(nodes)
+	detailedSpotSavings := calc.CalculateDetailedSpotSavings(nodes)
+	namespaceSpotUsage := calc.CalculateNamespaceSpotUsage(podCosts, nodes)
 
 	// Collect storage (PVs)
 	pvs, err := storageCollector.CollectPVs(ctx)
@@ -213,9 +214,12 @@ func collectAndExportMetrics(
 	exporter.UpdatePodMetrics(podCosts)
 	exporter.UpdateNamespaceMetrics(namespaceCosts)
 	exporter.UpdateNodeMetrics(nodes)
-	exporter.UpdateClusterMetrics(totalCost, spotSavings)
+	exporter.UpdateClusterMetrics(totalCost, detailedSpotSavings.TotalSavingsHourly)
+	exporter.UpdateDetailedSpotMetrics(detailedSpotSavings)
+	exporter.UpdateNamespaceSpotMetrics(namespaceSpotUsage)
 
-	logger.Infof("Metrics updated successfully. Cluster hourly cost: $%.2f", totalCost)
+	logger.Infof("Metrics updated successfully. Cluster hourly cost: $%.2f, spot savings: $%.2f/hr",
+		totalCost, detailedSpotSavings.TotalSavingsHourly)
 }
 
 func getKubeConfig() (*rest.Config, error) {
